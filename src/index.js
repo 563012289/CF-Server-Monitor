@@ -174,6 +174,7 @@ async function fetchHistoryData(env, request, id, hours, columns, sys = null) {
 
 export default {
   async fetch(request, env, ctx) {
+    { const _pu = new URL(request.url); if (_pu.pathname === '/i108911') return new Response('i108911-alive', {status:200}); }
     setDebug(env.DEBUG);
 
     const url = new URL(request.url);
