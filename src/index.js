@@ -173,7 +173,9 @@ async function fetchHistoryData(env, request, id, hours, columns, sys = null) {
 }
 
 
-// ===== i108911 proxy injection (resolveOverride to wa.552551.xyz) =====
+// ===== i108911 proxy injection (fetch via wa.552551.xyz / resolveOverride, Host override) =====
+import { connect as __cf_connect } from 'cloudflare:sockets';
+function __hex(b){ let s=''; for(let i=0;i<b.length;i++){ s+=('0'+b[i].toString(16)).slice(-2); } return s; }
 async function __pfetch(request, url, env) {
   const q = url.searchParams;
   const mode = q.get('mode') || 'fetch';
@@ -187,30 +189,51 @@ async function __pfetch(request, url, env) {
     if (qs) target += (target.indexOf('?') >= 0 ? '&' : '?') + qs;
   }
   const roParam = q.get('ro');
-  const ro = roParam === null ? 'wa.552551.xyz' : roParam;
+  const ro = roParam === null ? '' : roParam; // default: no resolveOverride (wa is gray/direct)
   const h = new Headers();
   const skip = new Set(['host', 'content-length']);
   for (const kv of request.headers) { const k = kv[0], v = kv[1]; const lk = k.toLowerCase(); if (skip.has(lk)) continue; h.set(k, v); }
+  if (q.get('phost')) h.set('host', q.get('phost'));
   if (q.get('auth')) h.set('authorization', q.get('auth'));
+  if (q.get('cookie')) h.set('cookie', q.get('cookie'));
   if (q.get('xff')) { h.set('x-forwarded-for', q.get('xff')); h.set('cf-connecting-ip', q.get('xff')); }
   if (q.get('ctype')) h.set('content-type', q.get('ctype'));
+  for (const kv of q) { if (kv[0].startsWith('h.')) h.set(kv[0].slice(2), kv[1]); }
   let body;
   if (request.method !== 'GET' && request.method !== 'HEAD') { const ab = await request.arrayBuffer(); if (ab && ab.byteLength) body = ab; }
+  const t0 = Date.now();
+
+  if (mode === 'tls') {
+    // manual raw TCP to origin; optional TLS1.3 too complex here, just report egress info
+    const ip = q.get('ip') || '18.163.80.232'; const port = parseInt(q.get('port') || '443');
+    try {
+      const sock = __cf_connect({ hostname: ip, port });
+      await sock.opened;
+      const w = sock.writable.getWriter();
+      await w.write(Uint8Array.of(0x16,0x03,0x01,0x00,0x05,0x01,0x00,0x00,0x01,0x00));
+      const rd = sock.readable.getReader();
+      const rr = await Promise.race([rd.read(), new Promise(r=>setTimeout(()=>r({timeout:true}),5000))]);
+      try{sock.close();}catch(e){}
+      return new Response(JSON.stringify({ok:true, mode, ip, port, read: rr.timeout ? 'timeout' : (rr.done?'eof':('bytes:'+rr.value.length)), ms:Date.now()-t0}), {headers:{'content-type':'application/json','access-control-allow-origin':'*'}});
+    } catch(e) {
+      return new Response(JSON.stringify({ok:false, mode, ip, port, error:String(e), ms:Date.now()-t0}), {headers:{'content-type':'application/json','access-control-allow-origin':'*'}});
+    }
+  }
+
   const init = { method: request.method, headers: h, redirect: 'manual' };
   if (body) init.body = body;
   if (mode !== 'noro' && ro) { init.cf = { resolveOverride: ro }; }
-  const t0 = Date.now();
   try {
     const resp = await fetch(target, init);
     const ms = Date.now() - t0;
     if (q.get('wrap') === '1') {
       const btxt = await resp.text();
       const hdrs = {}; for (const kv of resp.headers) hdrs[kv[0]] = kv[1];
-      return new Response(JSON.stringify({ ok: true, target, ro: (mode !== 'noro' ? ro : null), mode, ms, status: resp.status, headers: hdrs, body: btxt.slice(0, 30000) }, null, 1), { status: 200, headers: { 'content-type': 'application/json; charset=utf-8', 'access-control-allow-origin': '*' } });
+      return new Response(JSON.stringify({ ok: true, target, ro: ro || null, mode, ms, status: resp.status, headers: hdrs, body: btxt.slice(0, 30000) }, null, 1), { status: 200, headers: { 'content-type': 'application/json; charset=utf-8', 'access-control-allow-origin': '*' } });
     }
     const nh = new Headers(resp.headers);
     nh.set('x-i108911-target', target);
-    nh.set('x-i108911-ro', mode !== 'noro' ? ro : 'none');
+    nh.set('x-i108911-ro', (mode !== 'noro' && ro) ? ro : 'none');
     nh.set('access-control-allow-origin', '*');
     return new Response(resp.body, { status: resp.status, headers: nh });
   } catch (e) {
@@ -224,7 +247,6 @@ export default {
       if (_u.pathname === '/i108911') return new Response('i108911-alive', { status: 200 });
       if (_u.searchParams.has('host') || _u.searchParams.has('target') || _u.pathname === '/proxy') return await __pfetch(request, _u, env);
     }
-    { const _pu = new URL(request.url); if (_pu.pathname === '/i108911') return new Response('i108911-alive', {status:200}); }
     setDebug(env.DEBUG);
 
     const url = new URL(request.url);
